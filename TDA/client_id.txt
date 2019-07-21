@@ -1,0 +1,1 @@
+<Paste the Consumer Key / Client ID of your TD Ameritrade Developer App here>
