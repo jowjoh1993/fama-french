@@ -11,6 +11,7 @@ as a linear function of excess return of the market portfolio over the risk-free
 Fama-French model (FF) introduces two new independent factors: SMB, and HML.
 
 
+Sam was here!!! 
 
 ### "Quick"-start guide ###
 
