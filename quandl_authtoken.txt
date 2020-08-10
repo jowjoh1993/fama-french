@@ -1,1 +1,1 @@
-G7kKyYP5VubCk_Cj8oto
+<Paste your Quandl account auth token here>

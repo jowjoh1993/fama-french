@@ -27,7 +27,7 @@
 #%%####################### Define constants ###################################
 
 # Change root_dir to the directory you which you downloaded the project
-root_dir = r"C:\Users\saknox\OneDrive - SAS\Project\famaFrench"
+root_dir = r"C:\Users\joshj\Desktop\algo"
 
 # Maximum number of NaNs allowed in price history
 nan_limit = 10
