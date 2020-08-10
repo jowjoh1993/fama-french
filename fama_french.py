@@ -27,7 +27,7 @@
 #%%####################### Define constants ###################################
 
 # Change root_dir to the directory you which you downloaded the project
-root_dir = r"C:\Users\joshj\Desktop\algo"
+root_dir = r"C:\Users\saknox\OneDrive - SAS\Project\famaFrench"
 
 # Maximum number of NaNs allowed in price history
 nan_limit = 10
@@ -112,6 +112,7 @@ def slice_price_data(symbol,data):
 # ["GOOG","AAPL"], returns the price of GOOG + AAPL (one share each)
 def get_portfolio_prices(list_of_symbols, prices_df):
     j = 1
+    x = 0
     for sym in list_of_symbols:
         if sym in prices_df.columns:
             if sym == "BRK/B":
@@ -327,7 +328,10 @@ k=1
 for sym in symbol_list:
     if sym in returns.columns:
         y = returns[sym]
-        model = sm.OLS(y,X).fit()
+        try:
+           model = sm.OLS(y,X).fit()
+        except ValueError:  #raised if `y` is empty.
+           break
         paramdict = model.params.to_dict()
         paramdict['symbol'] = sym
         paramdict['rsquared'] = model.rsquared
@@ -341,10 +345,16 @@ for sym in symbol_list:
     #end if
 #end for
 
-params = params.rename(columns={'excess_return':'beta_market','SMB':'beta_smb',
+try:
+    if val is None: # The variable
+        print('It is None')
+except NameError:
+    print ("This variable is not defined")
+else:
+   params = params.rename(columns={'excess_return':'beta_market','SMB':'beta_smb',
                                 'HML':'beta_hml','const':'alpha'})
-params = params.sort_values(by='alpha',ascending=False)
+   params = params.sort_values(by='alpha',ascending=False)
 
-# Print out stocks with the highest alpha, sort by descending rsquared
-print(params.head(50).sort_values(by='rsquared',ascending=False))
+   # Print out stocks with the highest alpha, sort by descending rsquared
+   print(params.head(50).sort_values(by='rsquared',ascending=False))
 

@@ -10,9 +10,6 @@ three-factor model. This model is an extension to the familiar CAPM, which expla
 as a linear function of excess return of the market portfolio over the risk-free rate. The
 Fama-French model (FF) introduces two new independent factors: SMB, and HML.
 
-
-Sam was here!!! Yes he is!!
-
 ### "Quick"-start guide ###
 
 This assumes you have (free) Quandl and TD Ameritrade developer accounts, and you know how to create
@@ -178,8 +175,8 @@ I will mostly be recounting those steps here, with some additional detail.
    
 	a. Paste the following into your browser's address bar:
 	
-		https://auth.tdameritrade.com/auth?response_type=code&redirect_uri=<EncodedCallbackURL>&client_id=<ConsumerKey>
-		
+		https://auth.tdameritrade.com/auth?response_type=code&redirect_uri=<EncodedCallbackURL>&client_id=<ConsumerKey>%40AMER.OAUTHAP
+	
 	   Replace <EncodedCallbackURL> with the output you saved from step 5.
 	   Replace <ConsumerKey> with the consumer key from step 4.
 	   
@@ -207,7 +204,7 @@ I will mostly be recounting those steps here, with some additional detail.
 		access_type 	= offline
 		code 			= <decoded_code>
 		client_id 		= <ConsumerKey>
-		redirect_uri 	= <EncodedCallbackURL>
+		redirect_uri 	= <decoded_CALLBACK_URL> (as seen in the Details page of the api)
 		
 	c. Click "Send." You should receive a response containing the following:
 		
