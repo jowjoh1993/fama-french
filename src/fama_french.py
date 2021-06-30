@@ -24,10 +24,22 @@
 #   By using this program, you agree that you understand the risks inherent 
 #   in stock market investments.
 
+#%%######################## Import modules ####################################
+
+import os
+import pandas as pd
+import time
+import math
+import quandl
+import statsmodels.api as sm
+from SchemaUtils import SchemaUtils
+from DBUpdgradeScript import DBUpgradeScript
+from td.exceptions import NotFndError
+
 #%%####################### Define constants ###################################
 
 # Change root_dir to the directory you which you downloaded the project
-root_dir = r"C:\Users\joshj\Desktop\algo"
+root_dir = os.path.abspath("")
 
 # Maximum number of NaNs allowed in price history
 nan_limit = 10
@@ -35,16 +47,6 @@ nan_limit = 10
 # List the data to keep after the GET calls
 keys_to_keep=["symbol","marketCap","bookValuePerShare","sharesOutstanding"]
 
-
-#%%######################## Import modules ####################################
-
-import json
-import requests
-import pandas as pd
-import time
-import math
-import quandl
-import statsmodels.api as sm
 
 #%%####################### Function definitions ###############################
 
@@ -54,15 +56,13 @@ import statsmodels.api as sm
 #    access_token: OAuth2 access token for API authentication
 # Outputs
 #    JSON object containing fundamental data for the stock
-def get_fundamentals(symbol, access_token):
-    headers = {"Authorization": "Bearer " + access_token}
-    url = "https://api.tdameritrade.com/v1/instruments" 
-    url = url + "?symbol=" + symbol + "&projection=fundamental"
-    print("Getting fundamental data for " + symbol + "...")
-    response = requests.get(url, headers=headers)
-    print(response)
-    me_json = response.json()
-    return me_json
+def get_fundamentals(symbol,td_client):
+    
+    print("Getting fundamental data for "+symbol+"...")
+  
+    response = td_client.search_instruments(symbol=symbol,projection='fundamental')
+
+    return response
 #end def
 
 # Make GET requests to the TD Ameritrade API for price history data
@@ -72,24 +72,27 @@ def get_fundamentals(symbol, access_token):
 # IMPORTANT: If you change the frequency to something other than "daily", you
 # must also change the calculation of the risk free return in the "Calculate
 # returns" section below to match.
-def get_prices(symbol, 
-               access_token, 
+
+def get_prices(symbol,
+               td_client,                
                periodType = "year",
                period = 1,
                frequencyType = "daily",
-               frequency = 1
+               frequency = 1,
                ):
-    headers = {"Authorization": "Bearer " + access_token}
-    url = "https://api.tdameritrade.com/v1/marketdata/"+symbol+"/pricehistory"
-    url = url + "?periodType="+periodType
-    url = url + "&period="+str(period)
-    url = url + "&frequencyType="+frequencyType
-    url = url + "&frequency="+str(frequency)
-    print("Getting price data for " + symbol + "...")
-    response = requests.get(url, headers=headers)
-    print(response)
-    me_json = response.json()
-    return me_json
+    
+    print("Getting price data for "+symbol+"...")
+    try:
+        response=td_client.get_price_history(symbol=symbol,
+                                         period_type=periodType,
+                                         period=period,
+                                         frequency_type=frequencyType,
+                                         frequency=frequency
+                                        )
+    except NotFndError:
+        print("Price data not found... continue")
+        return
+    return response
 #end def
 
 # Converts 'milliseconds since epoch' to 'YYYY-MM-DD'
@@ -144,52 +147,11 @@ def read_file(filepath, split=False):
     #end with
 #end def
 
-#%%############################# Read files ###################################
-
-# Read client ID for TD Ameritrade app
-client_id = read_file(root_dir + r"\TDA\client_id.txt")
-
-# Read the access token for API authentication
-token = read_file(root_dir + r"\TDA\access_token.txt")
-
-# Read the list of assets to include in the model
-symbol_list = read_file(root_dir + r"\asset_universe.txt", split=True)
-
-# Read the Quandle auth token
-authtoken = read_file(root_dir + r"\quandl_authtoken.txt")
-
-
-#%%#################### Get fundamental data ##################################
-
-# Initialize the data frame to hold fundamental data
-fundamentals = pd.DataFrame()
-
-for sym in symbol_list:
-    # Call get_fundamentals and convert JSON to dictionary
-    temp = get_fundamentals(sym, token)
-    if sym in temp.keys():
-        dictionary = eval(json.dumps(temp))[sym]['fundamental']
-    
-        # Subset to only keep data specified in keys_to_keep
-        dictionary = {key: dictionary[key] for key in keys_to_keep}
-        
-        # Append dictionary to the data frame
-        fundamentals = fundamentals.append([dictionary])
-    else:
-        print("WARNING: " + sym + " is an invalid stock ticker symbol!")
-    #end if
-    
-    # TD has a limit of 2 API calls per second, so throttle back the speed
-    time.sleep(0.3)
-#end for
-
-# Calculate book-to-market ratio
-fundamentals['equity'] = fundamentals['bookValuePerShare'] * \
-                         fundamentals['sharesOutstanding']
-fundamentals['bookToMarket']=fundamentals['equity'] / fundamentals['marketCap']
-
 
 #%%#################### Construct Portfolios ##################################
+
+schema = SchemaUtils()
+fundamentals=schema.executeSelectStatment('fundamentals')
 
 # If values are zero, we don't care about them
 subFund = fundamentals[abs(fundamentals.bookToMarket) > 0.00001]
@@ -221,51 +183,19 @@ bg = pd.merge(big, growth, how='inner')['symbol']
 bn = pd.merge(big, neutral, how='inner')['symbol']
 bv = pd.merge(big, value, how='inner')['symbol']
 
-#%%#################### Refresh access token ##################################
+#%%#################### Get Prices ##################################
 
-# TD Ameritrade's API access tokens expire after just 30 minutes. Is is 
-# recommended that, at this point in the program, you return to an internet
-# browser and refresh the token at the following address:
-
-# https://developer.tdameritrade.com/authentication/apis/post/token-0
-
-# I have not yet been able to get the POST call for this action to work
-# successfully from Python. Unless you can figure this part out, you'll just
-# have to run the POST from the browser.
-
-# Once you refresh the token, make sure to update it in the access_token.txt
-# file, save the file, and re-read the file by running this line of code:
-
-token = read_file(root_dir + r"\TDA\access_token.txt")
-
-#%%####################### Get price history ##################################
-
-# Get the historical stock prices for symbols in symbol_list
-j = 1
-for sym in symbol_list:
-    result = get_prices(sym,token)
-    if result['empty'] == False:
-        df = slice_price_data(sym,result)
-        if j == 1:
-            prices = df
-            j = j + 1
-        else:
-            prices = pd.merge(prices, df, how='outer',left_index=True,
-                               right_index=True)
-        #end if
+upgrade = DBUpgradeScript()
+td_client = upgrade.login()        
+sector_list = schema.getSectorList()
+firstPrices = True
+for sector in sector_list:
+    price = schema.executeSelectStatment(sector)
+    if firstPrices:
+        prices = price
     else:
-        print("WARNING: " + sym + " is an invalid stock ticker symbol!")
-    #end if
-    time.sleep(0.3) # As before, can't make too many API requests per second
-#end for
-
-# Drop any column with too much missing data
-for col in prices.columns:
-    if prices[col].isna().sum() > nan_limit:
-        print("WARNING: NaN limit exceeded! Dropping " + col + ".")
-        prices = prices.drop(columns=[col])
-    #end if
-#end for
+        prices = pd.merge(prices, price, how='outer',left_index=True,
+                              right_index=True)     
 
 # Get prices for value-weighted Fama-French portfolios
 prices['sg'] = get_portfolio_prices(sg, prices)
@@ -276,13 +206,13 @@ prices['bn'] = get_portfolio_prices(bn, prices)
 prices['bv'] = get_portfolio_prices(bv, prices)
 
 # Get the market portfolio price (NASDAQ + NYSE + XMI)
-nasdaq = slice_price_data("NDX",get_prices("NDX",token))
+nasdaq = upgrade.slice_price_data("NDX",upgrade.get_prices("NDX",td_client))
 prices = pd.merge(prices,nasdaq,how='outer',left_index=True,right_index=True)
 
-nyse = slice_price_data("NYA",get_prices("NYA",token))
+nyse = slice_price_data("NYA",get_prices("NYA",td_client))
 prices = pd.merge(prices,nyse,how='outer',left_index=True,right_index=True)
 
-xmi = slice_price_data("XMI",get_prices("XMI",token))
+xmi = slice_price_data("XMI",get_prices("XMI",td_client))
 prices = pd.merge(prices,xmi,how='outer',left_index=True,right_index=True)
 
 prices['market']=prices['NDX']+prices['NYA']+prices['XMI']
@@ -296,7 +226,7 @@ returns = prices.pct_change()
 returns = returns.drop(returns.index[0]) #First row is always NaN, just drop
 
 # Get the daily risk-free rate of return
-tbill = quandl.get("USTREASURY/BILLRATES", authtoken=authtoken).tail(250)
+tbill = quandl.get("USTREASURY/BILLRATES", authtoken=QUANDL_TOKEN).tail(250)
 tbill = tbill[['52 Wk Bank Discount Rate']]
 tbill = tbill.rename(columns={'52 Wk Bank Discount Rate':'riskFreeRate'})
 tbill['riskFreeRate'] = (tbill['riskFreeRate'] / 100).apply(yearly_to_daily)
@@ -325,7 +255,7 @@ X = returns[['excess_return', 'SMB', 'HML']]
 X = sm.add_constant(X)
 
 k=1
-for sym in symbol_list:
+for sym in prices.columns:
     if sym in returns.columns:
         y = returns[sym]
         try:
@@ -357,4 +287,3 @@ else:
 
    # Print out stocks with the highest alpha, sort by descending rsquared
    print(params.head(50).sort_values(by='rsquared',ascending=False))
-
