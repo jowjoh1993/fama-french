@@ -44,7 +44,13 @@ class DBUpdateScript:
         return df
     #end def
 
-    def get_fundamentals(symbol,td_client):
+    # Make GET requests to the TD Ameritrade API for fundamental data
+    # Inputs
+    #    symbol : symbol of the stock whose data you want, e.g. "GOOG"
+    #    access_token: OAuth2 access token for API authentication
+    # Outputs
+    #    JSON object containing fundamental data for the stock
+    def get_fundamentals(self,symbol,td_client):
         
         print("Getting fundamental data for "+symbol+"...")
   
@@ -60,7 +66,6 @@ class DBUpdateScript:
     # IMPORTANT: If you change the frequency to something other than "daily", you
     # must also change the calculation of the risk free return in the "Calculate
     # returns" section below to match.
-
     def get_prices(self,
                    symbol,
                    td_client,                
@@ -84,10 +89,8 @@ class DBUpdateScript:
         return response
     #end def    
     
-    def getFundamentalsData(self,sector_list,td_client):
+    def getFundamentalsData(self,sector_list,tickers,td_client):
         keys_to_keep=["symbol","marketCap","bookValuePerShare","sharesOutstanding"]        
-        tickers = schema.getTickers()
-        sector_list = schema.getSectorList(tickers)
         
         # Initialize the data frame to hold fundamental data
         fundamentals = pd.DataFrame()
@@ -121,7 +124,7 @@ class DBUpdateScript:
         
         return fundamentals                
     
-    def updateFundamentalsTable(fundamentals):    
+    def updateFundamentalsTable(self,fundamentals):    
         fundamentals_columns = fundamentals.columns.tolist()
         index = fundamentals_columns.pop(0)
         fundamentals=fundamentals.set_index(index)
@@ -139,7 +142,7 @@ class DBUpdateScript:
             symbol_list=tickers[tickers['Sector'] == sector]['Symbol'].tolist()
             for sym in symbol_list:
                 result = self.get_prices(symbol=sym,td_client=td_client)
-                if result['empty'] == False:
+                if result is not None:
                     df = self.slice_price_data(sym,result)
                     if firstPrice:
                         price = df
@@ -162,7 +165,8 @@ class DBUpdateScript:
                 #end if
             #end for    
     
-            price_columns=schema.removeKeywordsFromSymbols(price.columns)
+            price_columns=schema.removeKeywordsFromSymbols(price.columns.tolist())
+            price.columns = price_columns
             schema.executeCreateTableStatement(columns=price_columns,table_name=sector,index='Date')
             schema.executeInsertStatement(df=price,table_name=sector,index='Date')
     
@@ -185,8 +189,9 @@ class DBUpdateScript:
         td_client = update.login()        
         tickers = schema.getTickers()
         sector_list = schema.getSectorList()
-        #fundamentals = update.getFundamentalsData(sector_list,td_client)
-        #update.updateFundamentalsTable(fundamentals)
+        
+        fundamentals = update.getFundamentalsData(sector_list,tickers,td_client)
+        update.updateFundamentalsTable(fundamentals)
         update.updatePricesTables(sector_list,tickers,td_client)
         
         

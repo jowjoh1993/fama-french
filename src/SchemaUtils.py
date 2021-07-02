@@ -22,7 +22,8 @@ class SchemaUtils:
         self.data = []
     
     def writeCreateTableStatement(self,columns,table_name,index):
-        create_statement = 'CREATE TABLE IF NOT EXISTS price_data.'+table_name+' ( '+index+' VARCHAR(255)'
+        create_statement = 'DROP TABLE IF EXISTS price_data.'+table_name+';CREATE TABLE IF NOT EXISTS price_data.'+table_name+' ( '+index+' VARCHAR(255)'
+        print(create_statement)
         for column in columns:
             create_statement+=str(', '+column+' double precision')
         create_statement+=');'
@@ -32,6 +33,7 @@ class SchemaUtils:
         conn = psycopg2.connect(dbname='postgres', user='postgres', password='Sk138125!')
         cursor = conn.cursor()
         create_statement = self.writeCreateTableStatement(columns,table_name,index)
+        print(create_statement)
         cursor.execute(create_statement)
         conn.commit()
         cursor.close()
@@ -55,14 +57,16 @@ class SchemaUtils:
         cursor.close()
         conn.close()
     
-    def executeSelectStatement(table_name):
+    def executeSelectStatement(self,table_name,index):
         conn = psycopg2.connect(dbname='postgres', user='postgres', password='Sk138125!')        
         select_statement = 'SELECT * FROM price_data.'+table_name
         df = sqlio.read_sql_query(select_statement, conn)
+        if index is not None:
+            df.set_index(index,drop=True,inplace=True)
         conn.close()
         return df
     
-    def removeKeywordsFromSymbols(symbols):
+    def removeKeywordsFromSymbols(self,symbols):
         keywords = ['ALL', 'ASC', 'ELSE', 'FOR', 'ON']
         for keyword in keywords:
             try: 
@@ -103,9 +107,9 @@ class SchemaUtils:
         cur = getCursor(conn)
         for sector in sector_list:
             symbols=tickers[tickers['Sector'] == sector]['Symbol'].tolist()
-            symbols=removeKeywordsFromSymbols(symbols)
+            symbols=schema.removeKeywordsFromSymbols(symbols)
             command=schema.writeCreateTableStatement(symbols,sector,'Date')
-        df=executeSelectStatement('fundamentals')
+        df=schema.executeSelectStatement('fundamentals',None)
         cur.execute(command)
         conn.commit()
         cur.close()

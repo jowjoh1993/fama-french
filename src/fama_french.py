@@ -26,89 +26,17 @@
 
 #%%######################## Import modules ####################################
 
-import os
 import pandas as pd
-import time
 import math
 import quandl
 import statsmodels.api as sm
+
+import numpy as np
+from TDA.config import QUANDL_TOKEN
 from SchemaUtils import SchemaUtils
-from DBUpdgradeScript import DBUpgradeScript
-from td.exceptions import NotFndError
-
-#%%####################### Define constants ###################################
-
-# Change root_dir to the directory you which you downloaded the project
-root_dir = os.path.abspath("")
-
-# Maximum number of NaNs allowed in price history
-nan_limit = 10
-
-# List the data to keep after the GET calls
-keys_to_keep=["symbol","marketCap","bookValuePerShare","sharesOutstanding"]
-
+from DBUpdateScript import DBUpdateScript
 
 #%%####################### Function definitions ###############################
-
-# Make GET requests to the TD Ameritrade API for fundamental data
-# Inputs
-#    symbol : symbol of the stock whose data you want, e.g. "GOOG"
-#    access_token: OAuth2 access token for API authentication
-# Outputs
-#    JSON object containing fundamental data for the stock
-def get_fundamentals(symbol,td_client):
-    
-    print("Getting fundamental data for "+symbol+"...")
-  
-    response = td_client.search_instruments(symbol=symbol,projection='fundamental')
-
-    return response
-#end def
-
-# Make GET requests to the TD Ameritrade API for price history data
-# Feel free to change the default argument values if you prefer different
-# periods or frequencies for your data, or just call the function with
-# different arguments.
-# IMPORTANT: If you change the frequency to something other than "daily", you
-# must also change the calculation of the risk free return in the "Calculate
-# returns" section below to match.
-
-def get_prices(symbol,
-               td_client,                
-               periodType = "year",
-               period = 1,
-               frequencyType = "daily",
-               frequency = 1,
-               ):
-    
-    print("Getting price data for "+symbol+"...")
-    try:
-        response=td_client.get_price_history(symbol=symbol,
-                                         period_type=periodType,
-                                         period=period,
-                                         frequency_type=frequencyType,
-                                         frequency=frequency
-                                        )
-    except NotFndError:
-        print("Price data not found... continue")
-        return
-    return response
-#end def
-
-# Converts 'milliseconds since epoch' to 'YYYY-MM-DD'
-def epoch_to_datetime(epoch_time):
-    return time.strftime('%Y-%m-%d', time.localtime(epoch_time/1000))
-#end def
-    
-# Subsets the historical price data returned from API calls
-def slice_price_data(symbol,data):
-    data = data['candles']
-    df = pd.DataFrame(data)[['close','datetime']]
-    df['datetime'] = df['datetime'].apply(epoch_to_datetime)
-    df = df.rename(columns={'close':symbol,'datetime':'date'})
-    df = df.set_index('date')
-    return df
-#end def
 
 # Given a list of symbols in a portfolios, returns the price of the value-
 # weighted portfolio of the symbols. For example, if list_of_symbols contains
@@ -136,26 +64,18 @@ def get_portfolio_prices(list_of_symbols, prices_df):
 def yearly_to_daily(yearly_rate):
     return (1 + yearly_rate) ** (1/360) - 1
 #end def
-    
-def read_file(filepath, split=False):
-    with open(filepath,"r") as f:
-        if split == False:
-            return f.read()
-        else:
-            return f.read().splitlines()
-        #end if
-    #end with
-#end def
-
 
 #%%#################### Construct Portfolios ##################################
 
 schema = SchemaUtils()
-fundamentals=schema.executeSelectStatment('fundamentals')
+fundamentals=schema.executeSelectStatement('fundamentals',None)
+#fundamentals['symbol']=fundamentals['symbol'].str.lower()
+[x.lower() for x in ["A", "B", "C"]]
+fundamentals['symbol']= [x.lower() for x in schema.removeKeywordsFromSymbols(fundamentals['symbol'].tolist())]
 
 # If values are zero, we don't care about them
-subFund = fundamentals[abs(fundamentals.bookToMarket) > 0.00001]
-subFund = subFund[subFund.marketCap > 0.0001]
+subFund = fundamentals[abs(fundamentals.booktomarket) > 0.00001]
+subFund = subFund[subFund.marketcap > 0.0001]
 
 # Get percentiles for determining Fama-French portfolios
 n = subFund.shape[0]
@@ -165,13 +85,13 @@ pc70 = pc10 * 7
 pc90 = pc10 * 9
 
 # Sort by Book to Market Ratio, construct growth, neutral, and value portfolios
-bm = subFund.sort_values('bookToMarket')
+bm = subFund.sort_values('booktomarket')
 growth = bm.iloc[0:pc30]
 neutral = bm.iloc[pc30:pc70]
 value = bm.iloc[pc70:n]
 
 # Sort by market cap, construct small and big portfolios
-mc = subFund.sort_values('marketCap')
+mc = subFund.sort_values('marketcap')
 small = mc.iloc[0:pc10]
 big = mc.iloc[pc90:n]
 
@@ -185,17 +105,23 @@ bv = pd.merge(big, value, how='inner')['symbol']
 
 #%%#################### Get Prices ##################################
 
-upgrade = DBUpgradeScript()
-td_client = upgrade.login()        
+update = DBUpdateScript()
+td_client = update.login()        
 sector_list = schema.getSectorList()
 firstPrices = True
 for sector in sector_list:
-    price = schema.executeSelectStatment(sector)
-    if firstPrices:
-        prices = price
+    price = schema.executeSelectStatement(sector,'date')
+    if not price.empty:
+        if firstPrices:
+            prices = price
+            firstPrices = False
+        else:
+            prices = pd.merge(prices, price, how='outer',left_index=True,
+                              right_index=True) 
     else:
-        prices = pd.merge(prices, price, how='outer',left_index=True,
-                              right_index=True)     
+        print('Dataset price_data.'+sector+' is empty. Rerun the DBUpdateScript to get this data.')
+
+prices.rename(columns={'date_x':'date'},inplace = True)
 
 # Get prices for value-weighted Fama-French portfolios
 prices['sg'] = get_portfolio_prices(sg, prices)
@@ -206,13 +132,18 @@ prices['bn'] = get_portfolio_prices(bn, prices)
 prices['bv'] = get_portfolio_prices(bv, prices)
 
 # Get the market portfolio price (NASDAQ + NYSE + XMI)
-nasdaq = upgrade.slice_price_data("NDX",upgrade.get_prices("NDX",td_client))
+nasdaq = update.slice_price_data("NDX",update.get_prices("NDX",td_client))
 prices = pd.merge(prices,nasdaq,how='outer',left_index=True,right_index=True)
 
-nyse = slice_price_data("NYA",get_prices("NYA",td_client))
+nyse = update.slice_price_data("NYA",update.get_prices("NYA",td_client))
 prices = pd.merge(prices,nyse,how='outer',left_index=True,right_index=True)
 
-xmi = slice_price_data("XMI",get_prices("XMI",td_client))
+xmi = update.slice_price_data("XMI",update.get_prices("XMI",td_client))
+for i in range(len(xmi.values)):
+    if xmi.values[i][0] == 0 and i != 0:
+        xmi.values[i][0] = xmi.values[i-1][0]
+    #end if
+#end for
 prices = pd.merge(prices,xmi,how='outer',left_index=True,right_index=True)
 
 prices['market']=prices['NDX']+prices['NYA']+prices['XMI']
@@ -236,7 +167,6 @@ returns = pd.merge(returns,tbill,how='outer',left_index=True,right_index=True)
 # Get excess return of the market over the risk-free rate
 returns['excess_return'] = returns['market'] - returns['riskFreeRate']
 
-
 # Calculate SMB and HML returns
 returns['SMB'] = (1/3)*(returns['sg']+returns['sn']+returns['sv']) - \
                  (1/3)*(returns['bg']+returns['bn']+returns['bv'])
@@ -254,14 +184,19 @@ returns = returns.dropna()
 X = returns[['excess_return', 'SMB', 'HML']]
 X = sm.add_constant(X)
 
+#Get rid of date
+prices_columns = prices.columns[1:]
+returns_columns = returns.columns[1:]
+np.seterr(all='raise')
 k=1
-for sym in prices.columns:
-    if sym in returns.columns:
+for sym in prices_columns:
+    if sym in returns_columns:
         y = returns[sym]
         try:
            model = sm.OLS(y,X).fit()
-        except ValueError:  #raised if `y` is empty.
-           break
+        except ValueError as e:  #raised if `y` is empty.
+            print('Invalid value!!!')
+            print(e)
         paramdict = model.params.to_dict()
         paramdict['symbol'] = sym
         paramdict['rsquared'] = model.rsquared
@@ -274,16 +209,21 @@ for sym in prices.columns:
         k = k + 1
     #end if
 #end for
-
-try:
-    if val is None: # The variable
-        print('It is None')
-except NameError:
-    print ("This variable is not defined")
-else:
-   params = params.rename(columns={'excess_return':'beta_market','SMB':'beta_smb',
+    
+params = params.rename(columns={'excess_return':'beta_market','SMB':'beta_smb',
                                 'HML':'beta_hml','const':'alpha'})
-   params = params.sort_values(by='alpha',ascending=False)
+params = params.sort_values(by='alpha',ascending=False)
 
-   # Print out stocks with the highest alpha, sort by descending rsquared
-   print(params.head(50).sort_values(by='rsquared',ascending=False))
+not_in = ['market','NDX','XMI','NYA','bg','bn','bv','sg','sn','sv']
+params=params[~params['symbol'].isin(not_in)]
+# Print out stocks with the highest alpha, sort by descending rsquared
+topx = 40
+portfolio_size = 20000
+top_stocks=params.head(topx).sort_values(by='rsquared',ascending=False)
+latest_price=prices[top_stocks['symbol'].values].iloc[-1]
+top_stocks = pd.merge(top_stocks,latest_price,left_on='symbol',right_index=True)
+top_stocks.rename(columns={'2021-06-30':'latest_price'},inplace=True)
+top_stocks['equal_weighted']=np.ceil(portfolio_size/top_stocks['latest_price']/topx)
+top_stocks['total']=top_stocks['equal_weighted']*top_stocks['latest_price']
+print(top_stocks[['symbol','equal_weighted','latest_price','total']])
+print(top_stocks.sum())
