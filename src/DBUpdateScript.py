@@ -10,10 +10,13 @@ package_names = [
     'numpy'
 ]
 import pandas as pd
+import requests
 import json
 import time
-from td.client import TDClient
-from td.exceptions import NotFndError
+import datetime
+from td.credentials import TdCredentials
+from td.client import TdAmeritradeClient
+from td.exceptions import NotFndError, NotNulError
 from TDA.config import CONSUMER_KEY, REDIRECT_URI, JSON_PATH
 from SchemaUtils import SchemaUtils
 schema = SchemaUtils()
@@ -24,8 +27,8 @@ class DBUpdateScript:
         self.data = []
     
     def login(self):
-        td_client = TDClient(client_id = CONSUMER_KEY,redirect_uri = REDIRECT_URI, credentials_path=JSON_PATH)
-        td_client.login()
+        td_credentials = TdCredentials(client_id=CONSUMER_KEY, redirect_uri=REDIRECT_URI,credential_file=JSON_PATH)
+        td_client = TdAmeritradeClient(credentials=td_credentials)
         return td_client
     #end def
 
@@ -33,6 +36,10 @@ class DBUpdateScript:
     def epoch_to_datetime(self,epoch_time):
         return time.strftime('%Y-%m-%d', time.localtime(epoch_time/1000))
     #end def
+
+    def get_latest_date(self, df, date):
+        epoch_time = datetime.datetime.strptime(date,'%Y-%m-%d').timestamp()*1000
+        return int(epoch_time)
 
     # Subsets the historical price data returned from API calls
     def slice_price_data(self,symbol,data):
@@ -53,8 +60,12 @@ class DBUpdateScript:
     def get_fundamentals(self,symbol,td_client):
         
         print("Getting fundamental data for "+symbol+"...")
-  
-        response = td_client.search_instruments(symbol=symbol,projection='fundamental')
+        try:
+            instruments = td_client.instruments()
+            response = instruments.search_instruments(symbol=symbol,projection='fundamental')
+        except requests.exceptions.ConnectionError:
+            print("WARNING: Connection failure")
+            response = {"keys":""}
 
         return response
     #end def
@@ -73,19 +84,28 @@ class DBUpdateScript:
                    period = 1,
                    frequencyType = "daily",
                    frequency = 1,
+                   end_date = None
                    ):
     
         print("Getting price data for "+symbol+"...")
         try:
-            response=td_client.get_price_history(symbol=symbol,
+            prices = td_client.price_history()
+            response=prices.get_price_history(symbol=symbol,
                                          period_type=periodType,
                                          period=period,
                                          frequency_type=frequencyType,
-                                         frequency=frequency
+                                         frequency=frequency,
+                                         end_date=end_date
                                         )
+            print(response)
         except NotFndError:
             print("Price data not found... continue")
             return
+        except requests.exceptions.ConnectionError:
+            print("WARNING: Connection failure")
+            return
+        except NotNulError:
+            print("None found")
         return response
     #end def    
     
@@ -143,13 +163,16 @@ class DBUpdateScript:
             for sym in symbol_list:
                 result = self.get_prices(symbol=sym,td_client=td_client)
                 if result is not None:
-                    df = self.slice_price_data(sym,result)
-                    if firstPrice:
-                        price = df
-                        firstPrice = False
-                    else:
-                        price = pd.merge(price, df, how='outer',left_index=True,
+                    if not result['empty']:
+                        df = self.slice_price_data(sym,result)
+                        if firstPrice:
+                            price = df
+                            firstPrice = False
+                        else:
+                            price = pd.merge(price, df, how='outer',left_index=True,
                                          right_index=True)
+                    else:
+                        print("WARNING: dataframe is empty")
                     #end if
                 else:
                     print("WARNING: " + sym + " is an invalid stock ticker symbol!")
@@ -189,7 +212,7 @@ class DBUpdateScript:
         td_client = update.login()        
         tickers = schema.getTickers()
         sector_list = schema.getSectorList()
-        
+
         fundamentals = update.getFundamentalsData(sector_list,tickers,td_client)
         update.updateFundamentalsTable(fundamentals)
         update.updatePricesTables(sector_list,tickers,td_client)

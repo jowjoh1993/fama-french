@@ -4,16 +4,13 @@ Created on Sun Jun 27 10:39:23 2021
 
 @author: saknox
 """
-import pip
-import os
+from pip._internal import main as pip
+#import os
 from SchemaUtils import SchemaUtils
 package_names = [
-    'psycopg2',
-    'pandas',
-    'numpy',
-    'td-ameritrade-python-api'
+    'py-tda-api'
 ]
-pip.main(['install']+package_names)
+pip(['install','--verbose']+package_names)
 x = SchemaUtils()
-path = os.path.abspath(x.__file__)
+#path = os.path.abspath(x.__file__)
 

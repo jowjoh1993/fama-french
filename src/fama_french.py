@@ -35,6 +35,7 @@ import numpy as np
 from TDA.config import QUANDL_TOKEN
 from SchemaUtils import SchemaUtils
 from DBUpdateScript import DBUpdateScript
+import yfinance as yf
 
 #%%####################### Function definitions ###############################
 
@@ -131,30 +132,36 @@ prices['bg'] = get_portfolio_prices(bg, prices)
 prices['bn'] = get_portfolio_prices(bn, prices)
 prices['bv'] = get_portfolio_prices(bv, prices)
 
+today = '2022-01-07'
+epoch_today = update.get_latest_date(prices, '2022-01-07')
+
 # Get the market portfolio price (NASDAQ + NYSE + XMI)
-nasdaq = update.slice_price_data("NDX",update.get_prices("NDX",td_client))
+nasdaq = yf.download("^NDX", start="2021-01-07", end="2022-01-07");
+nasdaq = nasdaq[['Close']]
+nasdaq = nasdaq.rename(columns={'Close':'NDX'})
 prices = pd.merge(prices,nasdaq,how='outer',left_index=True,right_index=True)
 
-nyse = update.slice_price_data("NYA",update.get_prices("NYA",td_client))
+nyse = yf.download("^NYA", start="2021-01-07", end="2022-01-07");
+nyse = nyse[['Close']]
+nyse = nyse.rename(columns={'Close':'NYA'})
 prices = pd.merge(prices,nyse,how='outer',left_index=True,right_index=True)
 
-xmi = update.slice_price_data("XMI",update.get_prices("XMI",td_client))
-for i in range(len(xmi.values)):
-    if xmi.values[i][0] == 0 and i != 0:
-        xmi.values[i][0] = xmi.values[i-1][0]
-    #end if
-#end for
+xmi = yf.download("^XMI", start="2021-01-07", end="2022-01-07");
+xmi = xmi[['Close']]
+xmi = xmi.rename(columns={'Close':'XMI'})
 prices = pd.merge(prices,xmi,how='outer',left_index=True,right_index=True)
 
 prices['market']=prices['NDX']+prices['NYA']+prices['XMI']
-
-
 
 #%%####################### Calculate returns ##################################
 
 # Calculate returns
 returns = prices.pct_change()
+vol = prices.pct_change().std()*(252**0.5)
+print(vol)
+vol = vol.where(vol < 0.2)
 returns = returns.drop(returns.index[0]) #First row is always NaN, just drop
+returns = returns.filter(items=vol.index)
 
 # Get the daily risk-free rate of return
 tbill = quandl.get("USTREASURY/BILLRATES", authtoken=QUANDL_TOKEN).tail(250)
@@ -199,7 +206,12 @@ for sym in prices_columns:
             print(e)
         paramdict = model.params.to_dict()
         paramdict['symbol'] = sym
-        paramdict['rsquared'] = model.rsquared
+        try:
+            paramdict['rsquared'] = model.rsquared
+        except FloatingPointError as e:
+            print('Division by zero.. skipping ticker '+sym)
+            print(e)
+        paramdict['error'] = model.resid
         df = pd.DataFrame(paramdict, index=[k-1])
         if k == 1:
             params = df
@@ -212,17 +224,22 @@ for sym in prices_columns:
     
 params = params.rename(columns={'excess_return':'beta_market','SMB':'beta_smb',
                                 'HML':'beta_hml','const':'alpha'})
-params = params.sort_values(by='alpha',ascending=False)
+#params = params.sort_values(by='alpha',ascending=False)
 
-not_in = ['market','NDX','XMI','NYA','bg','bn','bv','sg','sn','sv']
+#not_in = ['market','NDX','XMI','NYA','bg','bn','bv','sg','sn','sv']
+not_in = ['market','QQQ','ONEQ','DIA','bg','bn','bv','sg','sn','sv']
+
 params=params[~params['symbol'].isin(not_in)]
+
 # Print out stocks with the highest alpha, sort by descending rsquared
 topx = 40
 portfolio_size = 20000
-top_stocks=params.head(topx).sort_values(by='rsquared',ascending=False)
-latest_price=prices[top_stocks['symbol'].values].iloc[-1]
-top_stocks = pd.merge(top_stocks,latest_price,left_on='symbol',right_index=True)
-top_stocks.rename(columns={'2021-06-30':'latest_price'},inplace=True)
+latest_price=prices[params['symbol'].values].iloc[-1]
+latest_price1=latest_price.to_frame()
+latest_price1.rename(columns={today:'latest_price'},inplace=True)
+latest_price2=latest_price1[latest_price1.loc[:,'latest_price'] < 1000]
+top_stocks=pd.merge(params,latest_price2,left_on='symbol',right_index=True)
+top_stocks=top_stocks.sort_values(by='rsquared',ascending=False).head(topx)
 top_stocks['equal_weighted']=np.ceil(portfolio_size/top_stocks['latest_price']/topx)
 top_stocks['total']=top_stocks['equal_weighted']*top_stocks['latest_price']
 print(top_stocks[['symbol','equal_weighted','latest_price','total']])

@@ -4,13 +4,7 @@ Spyder Editor
 
 This is a temporary script file.
 """
-package_names = [
-    'psycopg2',
-    'pandas',
-    'numpy'
-]
-import pip
-pip.main(['install']+package_names)
+
 import psycopg2, pandas as pd, numpy as np, os
 from psycopg2 import extras
 from psycopg2.extensions import register_adapter, AsIs
