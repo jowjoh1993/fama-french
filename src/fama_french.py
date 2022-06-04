@@ -28,7 +28,7 @@
 
 import pandas as pd
 import math
-import quandl
+import nasdaqdatalink as ndl
 import statsmodels.api as sm
 
 import numpy as np
@@ -36,6 +36,15 @@ from TDA.config import QUANDL_TOKEN
 from SchemaUtils import SchemaUtils
 from DBUpdateScript import DBUpdateScript
 import yfinance as yf
+
+
+#%%####################### Define constants ###################################
+
+# Amount of capital to invest
+inv_amount = 10000
+
+# Number of stocks to include in portfolio
+N = 10
 
 #%%####################### Function definitions ###############################
 
@@ -158,16 +167,18 @@ prices['market']=prices['NDX']+prices['NYA']+prices['XMI']
 # Calculate returns
 returns = prices.pct_change()
 vol = prices.pct_change().std()*(252**0.5)
-print(vol)
+#print(vol)
 vol = vol.where(vol < 0.2)
 returns = returns.drop(returns.index[0]) #First row is always NaN, just drop
 returns = returns.filter(items=vol.index)
 
 # Get the daily risk-free rate of return
-tbill = quandl.get("USTREASURY/BILLRATES", authtoken=QUANDL_TOKEN).tail(250)
+tbill = ndl.get("USTREASURY/BILLRATES", authtoken=QUANDL_TOKEN).tail(250)
 tbill = tbill[['52 Wk Bank Discount Rate']]
 tbill = tbill.rename(columns={'52 Wk Bank Discount Rate':'riskFreeRate'})
-tbill['riskFreeRate'] = (tbill['riskFreeRate'] / 100).apply(yearly_to_daily)
+
+# TODO: Do we need to divide by 100 here???
+tbill['riskFreeRate'] = (tbill['riskFreeRate']).apply(yearly_to_daily)
 
 returns = pd.merge(returns,tbill,how='outer',left_index=True,right_index=True)
 
@@ -231,16 +242,61 @@ not_in = ['market','QQQ','ONEQ','DIA','bg','bn','bv','sg','sn','sv']
 
 params=params[~params['symbol'].isin(not_in)]
 
-# Print out stocks with the highest alpha, sort by descending rsquared
-topx = 40
-portfolio_size = 20000
-latest_price=prices[params['symbol'].values].iloc[-1]
-latest_price1=latest_price.to_frame()
-latest_price1.rename(columns={today:'latest_price'},inplace=True)
-latest_price2=latest_price1[latest_price1.loc[:,'latest_price'] < 1000]
-top_stocks=pd.merge(params,latest_price2,left_on='symbol',right_index=True)
-top_stocks=top_stocks.sort_values(by='rsquared',ascending=False).head(topx)
-top_stocks['equal_weighted']=np.ceil(portfolio_size/top_stocks['latest_price']/topx)
-top_stocks['total']=top_stocks['equal_weighted']*top_stocks['latest_price']
-print(top_stocks[['symbol','equal_weighted','latest_price','total']])
-print(top_stocks.sum())
+#%%####################### Maximize both alpha and rsquared ##################
+
+
+max_fit = params.max()['rsquared']
+max_alpha = params.max()['alpha']
+
+
+# Weights for optimization
+w_fit = 0.0008
+w_alpha = 0.9992
+
+std = params.std()['alpha']
+mean = params.mean()['alpha']
+
+params['std_from_mean'] = round(abs(params['alpha']-mean)/std,ndigits=2)
+
+# Drop outliers where alpha is more than 6 std from the mean
+
+params = params[params['std_from_mean'] < 6]
+
+# Calculate objective function
+
+params['objective'] = w_fit*(params['rsquared']-max_fit)**2 + w_alpha*(params['alpha']-max_alpha)**2
+
+params.to_excel('results.xlsx')
+
+# Minimize objective function to maximize combination of alpha and rsquared
+params = params.sort_values(by='objective')
+
+shortlist = params.head(N)
+print(shortlist)
+
+   
+   
+#%%######################### Allocate Assets ##################################
+
+target = inv_amount / N
+
+allocation = {}
+current_prices = {}
+symbols = list(shortlist['symbol'])
+shortlist = shortlist.set_index('symbol')
+    
+for asset in symbols:
+    current_prices[asset] = list(prices[asset])[-1]
+    allocation[asset] = round(target / current_prices[asset])
+    
+allocation = pd.DataFrame(allocation, index=['Number of Shares']).transpose()
+current_prices = pd.DataFrame(current_prices, index=['Current Price']).transpose()
+
+allocation = allocation.join(current_prices)
+allocation['Subtotal'] = allocation['Number of Shares'] * allocation['Current Price']
+allocation = allocation.join(shortlist[['rsquared', 'alpha']])
+
+allocation.to_excel('allocation.xlsx')
+print(allocation)
+print("Total Portfolio Cost = $" + str(round(allocation.sum()['Subtotal'],2)))
+

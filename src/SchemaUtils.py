@@ -24,7 +24,7 @@ class SchemaUtils:
         return create_statement
 
     def executeCreateTableStatement(self,columns,table_name,index):
-        conn = psycopg2.connect(dbname='postgres', user='postgres', password='Sk138125!')
+        conn = psycopg2.connect(dbname='postgres', user='postgres', password='g6a!pSMMPOST')
         cursor = conn.cursor()
         create_statement = self.writeCreateTableStatement(columns,table_name,index)
         print(create_statement)
@@ -40,7 +40,7 @@ class SchemaUtils:
     
     def executeInsertStatement(self,df,table_name,index):
         register_adapter(np.int64, AsIs)
-        conn = psycopg2.connect(dbname='postgres', user='postgres', password='Sk138125!')
+        conn = psycopg2.connect(dbname='postgres', user='postgres', password='g6a!pSMMPOST')
         cursor = conn.cursor()
         df_values = df.values.tolist()
         for i in range(len(df_values)):
@@ -52,7 +52,7 @@ class SchemaUtils:
         conn.close()
     
     def executeSelectStatement(self,table_name,index):
-        conn = psycopg2.connect(dbname='postgres', user='postgres', password='Sk138125!')        
+        conn = psycopg2.connect(dbname='postgres', user='postgres', password='g6a!pSMMPOST')        
         select_statement = 'SELECT * FROM price_data.'+table_name
         df = sqlio.read_sql_query(select_statement, conn)
         if index is not None:
@@ -82,7 +82,7 @@ class SchemaUtils:
         sector_list.pop(sector_list.index(np.nan))
         return sector_list
     def getConnection(dbname,user,password):
-        conn = psycopg2.connect(dbname='postgres', user='postgres', password='Sk138125!')
+        conn = psycopg2.connect(dbname='postgres', user='postgres', password='g6a!pSMMPOST')
         return conn
     def getCursor(conn):
         cur = conn.cursor()
@@ -94,7 +94,7 @@ class SchemaUtils:
         from SchemaUtils import SchemaUtils
         schema = SchemaUtils()
         #schema.main()
-        conn = psycopg2.connect(dbname='postgres', user='postgres', password='Sk138125!')
+        conn = psycopg2.connect(dbname='postgres', user='postgres', password='g6a!pSMMPOST')
         tickers = getTickers(schema)
         sector_list = tickers.Sector.unique().tolist()
         sector_list.pop(sector_list.index(np.nan))
